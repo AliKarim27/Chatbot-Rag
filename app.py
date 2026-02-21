@@ -6,6 +6,10 @@ Then launch:  streamlit run app.py
 
 import streamlit as st
 from rag_core import load_vectorstore, build_rag_chain, vectorstore_exists
+from logger_setup import configure_logging, get_logger
+
+configure_logging()
+logger = get_logger(__name__)
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -26,6 +30,7 @@ if "ask_fn" not in st.session_state:
 if st.session_state.ask_fn is None:
     if vectorstore_exists():
         with st.spinner("Loading vector database..."):
+            logger.info("Vectorstore found — loading")
             vectorstore = load_vectorstore()
             st.session_state.ask_fn = build_rag_chain(vectorstore)
     else:
@@ -56,6 +61,7 @@ with st.sidebar:
     st.divider()
     if st.button("Reload Database"):
         with st.spinner("Reloading..."):
+            logger.info("Reloading vectorstore on user request")
             vectorstore = load_vectorstore()
             st.session_state.ask_fn = build_rag_chain(vectorstore)
             st.session_state.messages = []
@@ -95,6 +101,7 @@ if prompt := st.chat_input("Type your question here..."):
                     {"role": "assistant", "content": answer}
                 )
             except Exception as e:
+                logger.exception("Error generating response for prompt: %s", prompt)
                 error_msg = f"Error generating response: {e}"
                 st.error(error_msg)
                 st.session_state.messages.append(

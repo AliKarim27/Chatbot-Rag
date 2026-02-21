@@ -9,6 +9,10 @@ Usage:
 import time
 from tqdm import tqdm
 from rag_core import ingest_urls, CHROMA_DB_DIR
+from logger_setup import configure_logging, get_logger
+
+configure_logging()
+logger = get_logger(__name__)
 
 # ============================================================================
 # ADD YOUR URLS HERE as ("Title", "url", "description") tuples
@@ -81,13 +85,13 @@ URLS = [
 def main():
     start_time = time.time()
 
-    print("=" * 60)
-    print("  Webpage(s) --> ChromaDB Ingestion")
-    print("=" * 60)
-    print(f"\n  URLs : {len(URLS)}")
+    logger.info("%s", "=" * 60)
+    logger.info("  Webpage(s) --> ChromaDB Ingestion")
+    logger.info("%s", "=" * 60)
+    logger.info("\n  URLs : %d", len(URLS))
     for i, (title, url, desc) in enumerate(URLS, 1):
-        print(f"    {i:2d}. [{title}] {desc}")
-    print(f"  DB   : {CHROMA_DB_DIR}\n")
+        logger.info("    %2d. [%s] %s", i, title, desc)
+    logger.info("  DB   : %s\n", CHROMA_DB_DIR)
 
     # Progress bar
     pbar = tqdm(total=len(URLS), desc="Ingesting", unit="page",
@@ -109,31 +113,31 @@ def main():
     total_chars = sum(s["chars"] for s in stats)
     total_chunks = sum(s["chunks"] for s in stats)
 
-    print("\n" + "=" * 60)
-    print("  INGESTION SUMMARY")
-    print("=" * 60)
-    print(f"  Time elapsed : {elapsed:.1f}s")
-    print(f"  URLs total   : {len(URLS)}")
-    print(f"  Succeeded    : {ok_count}")
+    logger.info("\n%s", "=" * 60)
+    logger.info("  INGESTION SUMMARY")
+    logger.info("%s", "=" * 60)
+    logger.info("  Time elapsed : %.1fs", elapsed)
+    logger.info("  URLs total   : %d", len(URLS))
+    logger.info("  Succeeded    : %d", ok_count)
     if empty_count:
-        print(f"  Empty (skip) : {empty_count}")
+        logger.info("  Empty (skip) : %d", empty_count)
     if err_count:
-        print(f"  Failed       : {err_count}")
-    print(f"  Characters   : {total_chars:,}")
-    print(f"  Chunks       : {total_chunks}")
-    print(f"  DB location  : {CHROMA_DB_DIR}")
+        logger.warning("  Failed       : %d", err_count)
+    logger.info("  Characters   : %s", f"{total_chars:,}")
+    logger.info("  Chunks       : %d", total_chunks)
+    logger.info("  DB location  : %s", CHROMA_DB_DIR)
 
     # Show per-URL details
     if err_count or empty_count:
-        print("\n  Details:")
+        logger.info("\n  Details:")
         for s in stats:
             if s["status"] != "ok":
-                print(f"    [{s['status'].upper():5s}] {s['title']}")
+                logger.info("    [%5s] %s", s["status"].upper(), s["title"])
 
     stored = vectorstore._collection.count()
-    print(f"\n  {stored} chunks stored in ChromaDB.")
-    print("  You can now run the chatbot:  streamlit run app.py")
-    print("=" * 60)
+    logger.info("\n  %d chunks stored in ChromaDB.", stored)
+    logger.info("  You can now run the chatbot:  streamlit run app.py")
+    logger.info("%s", "=" * 60)
 
 
 if __name__ == "__main__":

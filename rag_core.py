@@ -9,6 +9,10 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
+from logger_setup import get_logger
+
+logger = get_logger(__name__)
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -28,6 +32,7 @@ CHROMA_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma
 
 def scrape_webpage(url: str) -> str:
     """Fetch the URL and return the visible text content."""
+    logger.info("Fetching URL: %s", url)
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -39,6 +44,7 @@ def scrape_webpage(url: str) -> str:
         response = requests.get(url, headers=headers, timeout=30)
     except requests.exceptions.SSLError:
         # Fallback: skip SSL verification for sites with certificate issues
+        logger.warning("SSL error fetching %s — retrying without verification", url)
         response = requests.get(url, headers=headers, timeout=30, verify=False)
     response.raise_for_status()
 
@@ -63,6 +69,7 @@ def scrape_webpage(url: str) -> str:
     text = soup.get_text(separator="\n", strip=True)
     # Collapse multiple blank lines
     text = re.sub(r"\n{3,}", "\n\n", text)
+    logger.debug("Fetched %d characters from %s", len(text), url)
     return text
 
 
@@ -100,6 +107,7 @@ def get_embeddings():
 def build_vectorstore(docs: list[Document], collection_name: str = "webpage"):
     """Create / overwrite a ChromaDB collection from documents."""
     embeddings = get_embeddings()
+    logger.info("Building vectorstore (collection=%s) with %d documents", collection_name, len(docs))
     # Delete existing collection to avoid duplicates on re-ingest
     vectorstore = Chroma.from_documents(
         documents=docs,
@@ -113,6 +121,7 @@ def build_vectorstore(docs: list[Document], collection_name: str = "webpage"):
 def load_vectorstore(collection_name: str = "webpage"):
     """Load an existing ChromaDB collection from disk."""
     embeddings = get_embeddings()
+    logger.info("Loading vectorstore (collection=%s) from %s", collection_name, CHROMA_DB_DIR)
     vectorstore = Chroma(
         persist_directory=CHROMA_DB_DIR,
         embedding_function=embeddings,
@@ -123,7 +132,9 @@ def load_vectorstore(collection_name: str = "webpage"):
 
 def vectorstore_exists() -> bool:
     """Check whether the ChromaDB directory exists and has data."""
-    return os.path.isdir(CHROMA_DB_DIR) and len(os.listdir(CHROMA_DB_DIR)) > 0
+    exists = os.path.isdir(CHROMA_DB_DIR) and len(os.listdir(CHROMA_DB_DIR)) > 0
+    logger.debug("vectorstore_exists=%s (dir=%s)", exists, CHROMA_DB_DIR)
+    return exists
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +150,7 @@ def get_llm():
     Requires Ollama to be installed and running.
     Pull the model first:  ollama pull llama3.2:3b
     """
+    logger.info("Instantiating Ollama model: %s", OLLAMA_MODEL)
     return ChatOllama(
         model=OLLAMA_MODEL,
         temperature=0.3,
@@ -154,13 +166,6 @@ You are a knowledgeable assistant for the Faculty of Engineering at the Lebanese
 You answer questions based ONLY on the provided context, which is scraped from official faculty webpages.
 If the answer is not in the context, say "I don't have enough information from the faculty webpages to answer that."
 
-Background:
-The Faculty of Engineering has three branches:
-- Branch 1 (Tripoli)
-- Branch 2 (Roumieh / Mount Lebanon)
-- Branch 3 (Hadath / Beirut)
-Each branch has its own administration, council, academic departments, and administrative departments.
-The faculty is led by a Dean and offers several engineering majors.
 
 Rules:
 - Be concise, accurate, and well-structured.
@@ -263,6 +268,7 @@ def build_rag_chain(vectorstore):
 
         # Fallback: pure semantic search
         retriever = vectorstore.as_retriever(search_kwargs={"k": K})
+        logger.debug("Performing semantic fallback retrieval for question: %s", question)
         return retriever.invoke(question)
 
     def ask(question: str, chat_history: list = None):
@@ -274,6 +280,7 @@ def build_rag_chain(vectorstore):
             chat_history = []
 
         # Retrieve relevant documents (hybrid: keyword + semantic)
+        logger.info("Retrieving documents for question: %s", question)
         source_docs = _retrieve(question)
         context = format_docs(source_docs)
 
@@ -285,11 +292,15 @@ def build_rag_chain(vectorstore):
             else:
                 history_messages.append(AIMessage(content=msg["content"]))
 
-        answer = chain.invoke({
-            "context": context,
-            "chat_history": history_messages,
-            "question": question,
-        })
+        try:
+            answer = chain.invoke({
+                "context": context,
+                "chat_history": history_messages,
+                "question": question,
+            })
+        except Exception:
+            logger.exception("LLM chain failed for question: %s", question)
+            raise
 
         return answer, source_docs
 
